@@ -1,0 +1,549 @@
+#
+# ESPHome configuration for a battery-powered 2.9" E-Paper display (WeAct 2.9").
+#
+# Features:
+# - Displays a 5-day weather forecast, current temperature, humidity, date/time, and battery status.
+# - Advanced deep sleep functionality with a dynamic, calculated wake-up time for overnight power saving.
+# - Fetches all data from a Home Assistant instance.
+# - Universal sleep logic correctly handles both same-day (e.g., 1am-6am) and overnight (e.g., 10pm-7am) sleep intervals.
+# - Code is cleaned up and commented for public sharing.
+#
+# Hardware:
+# - ESP32-C6 super mini (development board or similar)
+# - WeAct 2.9" E-Paper Display
+# - LiPo battery
+
+# Inspired by or used parts from:
+# - https://github.com/whitakerz/Battery-ESP32
+# - https://github.com/esphome/feature-requests/issues/1109#issuecomment-1059808670
+# - https://github.com/kotope/esphome_eink_dashboard
+# - https://gist.github.com/Plawasan/4ae826b05aaa7812f3a191714ca47a50
+# - https://github.com/hanspeda/esphome_homeassistant_display.git
+# - https://github.com/niahane/forecast-thermostat
+# - And many others from the ESPHome community.
+#
+
+substitutions:
+  # -- GENERAL DEVICE SETTINGS --
+  devicename: "esphome-epaper-display"
+  device_description: "ESP32-C6 E-Paper Weather Display"
+
+  # -- DEEP SLEEP TIMING --
+  run_time: 1min              # How long the device stays awake after boot/wakeup to fetch data and update the screen.
+  sleep_time: 10min             # Default deep sleep duration during the day.
+  night_mode_start_hour: "23"  # Hour when the device can start its long overnight sleep.
+  night_mode_end_hour: "6"    # Hour when the device should wake up from its long sleep.
+
+  # -- HOME ASSISTANT INTEGRATION --
+  temp_entity: sensor.temp_outdoor_temperature
+  humidity_entity: sensor.sonoff_10023ab22a_humidity
+  forecast_entity: sensor.weather_forecast_daily # A sensor that provides the 'forecast' attribute as JSON.
+
+  # -- DISPLAY LANGUAGE STRINGS for Day Names --
+  # Uncomment the language you want to use.
+
+  # English version
+  # day_sun: "Sunday"
+  # day_mon: "Monday"
+  # day_tue: "Tuesday"
+  # day_wed: "Wednesday"
+  # day_thu: "Thursday"
+  # day_fri: "Friday"
+  # day_sat: "Saturday"
+
+  # Czech version
+  day_sun: "Neděle"
+  day_mon: "Pondělí"
+  day_tue: "Úterý"
+  day_wed: "Středa"
+  day_thu: "Čtvrtek"
+  day_fri: "Pátek"
+  day_sat: "Sobota"
+
+esphome:
+  name: ${devicename}
+  comment: '${device_description}'
+  friendly_name: '${device_description}'
+  min_version: 2024.10.0
+  name_add_mac_suffix: false
+
+  on_boot:
+    priority: -100
+    then:
+      - light.turn_on: awake_led
+      - logger.log: "Boot: waiting for sensors to become ready before first draw, then sleep."
+      - component.update: adc_5v_raw
+      - component.update: adc_batt_raw
+      - delay: 200ms
+
+esp32:
+  variant: esp32c6
+  cpu_frequency: 80MHz # Lowering CPU frequency to reduce power consumption.
+  framework:
+    type: esp-idf
+
+logger:
+  level: INFO
+
+api: # Required for Home Assistant communication.
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap: # Fallback Access Point if main WiFi connection fails.
+    ssid: "Epaper Display Setup"
+    password: !secret wifi_ap_password
+
+captive_portal:
+
+json: # Required for parsing Home Assistant forecast attribute data.
+
+spi:
+  clk_pin: GPIO17 # SCK (SPI Clock)
+  mosi_pin: GPIO14 # MOSI (SPI Data Input) / SDA / DIN on some boards
+
+# Font configurations for the display.
+font:
+  # Large font for main temperature/humidity values.
+  - file:
+      type: gfonts
+      family: Roboto
+      weight: 900
+    id: roboto_30
+    size: 27
+  # Small font for date/time and battery status text.
+  - file:
+      type: gfonts
+      family: Roboto
+      weight: 300
+    id: roboto_14
+    size: 14
+  # Monospaced font for the forecast details.
+  - file:
+      type: gfonts
+      family: "Roboto Mono"
+    size: 14
+    bpp: 4
+    id: font_forecast
+  # Main font for forecast day names, includes all necessary characters for multiple languages.
+  - file:
+      type: gfonts
+      family: Roboto
+      weight: 900
+    size: 14
+    id: font_day
+    glyphs: "°|.%:0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzáÁčČďĎéÉěĚíÍňŇóÓřŘšŠťŤúÚůŮýÝžŽ"
+  # Font for icons (e.g., thermometer, water drop).
+  - file: 'fonts/materialdesignicons-webfont.ttf'
+    id: font_temp
+    size: 27
+    glyphs:
+      - "\U000F0F54" # mdiHomeThermometer
+      - "\U000F058E" # mdiWaterPercent
+  # Font for larger weather condition icons.
+  - file: 'fonts/materialdesignicons-webfont.ttf'
+    id: symbols_font
+    size: 45
+    glyphs:
+      # Add only the icons you need to save space.
+      - "\U000F0590" # Cloudy
+      - "\U000F0591" # Fog
+      - "\U000F0592" # Hail
+      - "\U000F0593" # Lightning
+      - "\U000F067E" # Lightning Rainy
+      - "\U000F0594" # Clear Night
+      - "\U000F0595" # Partly Cloudy
+      - "\U000F0596" # Pouring
+      - "\U000F0597" # Rainy
+      - "\U000F0598" # Snowy
+      - "\U000F067F" # Snowy Rainy
+      - "\U000F0599" # Sunny
+      - "\U000F059D" # Windy
+      - "\U000F059E" # Windy Variant
+
+globals:
+  # -- FORECAST DATA STORAGE --
+  # These arrays are populated by parsing the JSON from Home Assistant.
+  - id: x_forecast # Stores the calculated X-coordinates for each forecast column.
+    type: int[6]
+    restore_value: no
+    initial_value: '{0,0,0,0,0,0}'
+  - id: forecast_condition
+    type: std::array<std::string, 6>
+    restore_value: no
+    initial_value: '{"","","","","",""}'
+  - id: forecast_precip
+    type: float[6]
+    restore_value: no
+    initial_value: '{0.0,0.0,0.0,0.0,0.0,0.0}'
+  - id: forecast_temp_min
+    type: float[6]
+    restore_value: no
+    initial_value: '{0.0,0.0,0.0,0.0,0.0,0.0}'
+  - id: forecast_temp_max
+    type: float[6]
+    restore_value: no
+    initial_value: '{0.0,0.0,0.0,0.0,0.0,0.0}'
+
+  # -- LANGUAGE STRINGS --
+  # An array to hold the day names based on the 'language' substitution.
+  - id: day_names_ext
+    type: std::array<const char *, 8>
+    restore_value: no
+    initial_value: '{"", "${day_sun}", "${day_mon}", "${day_tue}", "${day_wed}", "${day_thu}", "${day_fri}", "${day_sat}"}'
+
+text_sensor:
+  # This sensor grabs the 'forecast' attribute from a weather entity in Home Assistant.
+  # The on_value trigger parses the JSON and populates the global arrays.
+  - platform: homeassistant
+    name: "Forecast JSON"
+    id: forecast_5
+    entity_id: ${forecast_entity}
+    attribute: forecast
+    internal: true
+    on_value:
+      then:
+        - lambda: |-
+            if (id(forecast_5).state.empty()) {
+              ESP_LOGE("forecast_parse", "Forecast sensor state is empty.");
+              return;
+            }
+            JsonDocument doc;
+            auto err = deserializeJson(doc, id(forecast_5).state.c_str());
+            if (err) {
+              ESP_LOGE("forecast_parse", "Deserialization error: %s", err.c_str());
+              return;
+            }
+            JsonArray root = doc.as<JsonArray>();
+            for (int i = 0; i < 5; i++) {
+              if (i < root.size()) {
+                JsonObject forecast_data = root[i];
+                if (!forecast_data.isNull()) {
+                  // The global arrays are 1-based, JSON is 0-based.
+                  id(forecast_condition)[i + 1] = forecast_data["condition"].as<std::string>();
+                  id(forecast_precip)[i + 1]    = forecast_data["precipitation"] | 0.0f;
+                  id(forecast_temp_max)[i + 1]  = forecast_data["temperature"]   | 0.0f;
+                  id(forecast_temp_min)[i + 1]  = forecast_data["templow"]       | 0.0f;
+                }
+              }
+            }
+
+sensor:
+  # -- WEATHER SENSORS --
+  # These sensors pull current weather data from Home Assistant.
+  - platform: homeassistant
+    id: humidity_outside
+    entity_id: ${humidity_entity}
+  - platform: homeassistant
+    id: temperature_outside
+    entity_id: ${temp_entity}
+
+  # -- ONBOARD SENSORS FOR POWER MANAGEMENT --
+  # Raw ADC reading from the 5V input voltage divider.
+  - platform: adc
+    id: adc_5v_raw
+    pin: GPIO4
+    attenuation: 12db
+    update_interval: 5min
+    internal: true
+  # Convert raw ADC reading to voltage, applying the divider multiplier.
+  - platform: copy
+    source_id: adc_5v_raw
+    id: source_voltage
+    name: "5V Input Voltage"
+    unit_of_measurement: "V"
+    accuracy_decimals: 2
+    filters:
+      - multiply: 1.7 # NOTE: Calibrate this multiplier for your specific voltage divider resistors.
+    on_value: # Use hysteresis to reliably detect if 5V is present.
+      then:
+        - lambda: |-
+            static bool present = false;
+            if (!present && x > 1.1) present = true;      // Detects ~1.98V on input as "present"
+            else if (present && x < 1.0) present = false; // Detects ~1.80V on input as "absent"
+            id(voltage_present).publish_state(present);
+
+  # Raw ADC reading from the battery voltage divider.
+  - platform: adc
+    id: adc_batt_raw
+    pin: GPIO3
+    attenuation: 12db
+    update_interval: 5min
+    internal: true
+  # Convert raw ADC reading to battery voltage.
+  - platform: copy
+    source_id: adc_batt_raw
+    id: battery_voltage
+    name: "Battery Voltage"
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 2
+    filters:
+      - multiply: 1.37 # NOTE: Calibrate this multiplier for your specific voltage divider.
+  # Convert battery voltage to a percentage using a non-linear curve for LiPo batteries.
+  - platform: copy
+    source_id: battery_voltage
+    id: battery_percent
+    name: "Battery Level"
+    unit_of_measurement: "%"
+    device_class: battery
+    state_class: measurement
+    accuracy_decimals: 0
+    filters:
+      # This curve maps voltage to percentage. Adjust for your specific battery.
+      - calibrate_linear:
+          - 4.18 -> 100
+          - 4.00 -> 85
+          - 3.85 -> 60
+          - 3.80 -> 50
+          - 3.70 -> 25
+          - 3.50 -> 5
+          - 3.30 -> 0
+      # Clamp values to the 0-100% range and apply a moving average to smooth out readings.
+      - clamp:
+          min_value: 0
+          max_value: 100
+      - sliding_window_moving_average:
+          window_size: 4
+          send_every: 1
+
+time:
+  # This component gets the current time from Home Assistant, essential for sleep logic.
+  - platform: homeassistant
+    id: home_time
+
+binary_sensor:
+  # A template sensor that represents whether the 5V input is connected.
+  - platform: template
+    id: voltage_present
+    name: "Voltage Present"
+    internal: true
+    device_class: power
+    filters:
+      - delayed_on: 100ms
+      - delayed_off: 300ms
+    on_release: # If voltage is lost, go to sleep immediately to save power.
+      then:
+        - logger.log: "Voltage lost — entering deep sleep."
+        - light.turn_off: awake_led
+        - deep_sleep.enter: deep_sleep_ctrl
+
+  # A template sensor to check if all required data has been received from Home Assistant.
+  # The display update will not run until this sensor is 'on'.
+  - platform: template
+    id: sensors_ready
+    internal: true
+    name: "Sensors Ready"
+    lambda: |-
+      return (
+        id(temperature_outside).has_state() &&
+        id(forecast_5).has_state() &&
+        !isnan(id(temperature_outside).state)
+      );
+    on_press: # Once sensors are ready...
+      then:
+        - logger.log: "Sensors ready — performing one-time EPaper update."
+        - component.update: epd # ...trigger the display update.
+        - if: # Then, decide whether to sleep or stay awake.
+            condition:
+              binary_sensor.is_off: voltage_present
+            then: # If on battery power, go to sleep after the update.
+              - logger.log: "5V absent — sleeping after draw."
+              - delay: 5s # Allow time for the display to finish updating.
+              - light.turn_off: awake_led
+              - script.execute: enter_sleep
+            else: # If plugged in, stay awake.
+              - logger.log: "5V present — staying awake."
+              - light.turn_on: awake_led
+
+script:
+  # This script contains the main logic for determining the sleep duration.
+  - id: enter_sleep
+    then:
+      - if:
+          # This universal condition checks if the current time is within the defined night mode window.
+          # It works for both same-day (e.g. 1am-6am) and cross-midnight (e.g. 10pm-6am) intervals.
+          condition:
+            lambda: |-
+              auto time = id(home_time).now();
+              if (!time.is_valid()) return false;
+              int start_hour = ${night_mode_start_hour};
+              int end_hour = ${night_mode_end_hour};
+              int current_hour = time.hour;
+              if (start_hour > end_hour) { // Cross-midnight interval
+                return (current_hour >= start_hour || current_hour < end_hour);
+              } else { // Same-day interval
+                return (current_hour >= start_hour && current_hour < end_hour);
+              }
+          then:
+            # --- NIGHT SLEEP ACTION ---
+            - logger.log: "Nighttime, calculating sleep to wake up at ${night_mode_end_hour}:00."
+            - homeassistant.event: # Optional: Send an event to Home Assistant for logging/debugging.
+                event: esphome.epaper_sleep
+                data:
+                  device: ${devicename}
+                  reason: "night_calculated"
+                  wakeup_time: "${night_mode_end_hour}:00"
+                  voltage: !lambda 'return id(battery_voltage).state;'
+                  now: !lambda 'return id(home_time).now().strftime("%Y-%m-%d %H:%M:%S");'
+            - deep_sleep.enter:
+                id: deep_sleep_ctrl
+                # This universal lambda calculates the exact duration needed to wake up at 'night_mode_end_hour'.
+                sleep_duration: !lambda |-
+                  auto time = id(home_time).now();
+                  int start_hour = ${night_mode_start_hour};
+                  int end_hour = ${night_mode_end_hour};
+                  int target_minutes = end_hour * 60;
+                  int current_minutes = time.hour * 60 + time.minute;
+                  int minutes_to_sleep;
+                  if (start_hour > end_hour) { // Cross-midnight logic
+                    if (current_minutes >= start_hour * 60) { // Before midnight
+                      minutes_to_sleep = (24 * 60 - current_minutes) + target_minutes;
+                    } else { // After midnight
+                      minutes_to_sleep = target_minutes - current_minutes;
+                    }
+                  } else { // Same-day logic
+                    minutes_to_sleep = target_minutes - current_minutes;
+                  }
+                  if (minutes_to_sleep <= 0) minutes_to_sleep = 1; // Safety net
+                  return (minutes_to_sleep * 60000); // Convert minutes to milliseconds.
+          else:
+            # --- DAY SLEEP ACTION ---
+            - logger.log: "It's daytime, entering short sleep for ${sleep_time}"
+            - homeassistant.event: # Optional: Send an event to Home Assistant for logging/debugging.
+                event: esphome.epaper_sleep
+                data:
+                  device: ${devicename}
+                  reason: "day"
+                  duration: "${sleep_time}"
+                  voltage: !lambda 'return id(battery_voltage).state;'
+                  now: !lambda 'return id(home_time).now().strftime("%Y-%m-%d %H:%M:%S");'
+            - deep_sleep.enter:
+                id: deep_sleep_ctrl
+                sleep_duration: ${sleep_time}
+
+# A simple GPIO output for the onboard LED to indicate when the device is awake.
+output:
+  - platform: gpio
+    pin: GPIO15 # WARNING: This is a strapping pin. If you experience boot issues, move to another pin.
+    id: led_pin
+
+light:
+  - platform: binary
+    name: "Awake LED"
+    id: awake_led
+    output: led_pin
+
+# This interval is for when the device is kept awake by the 5V power supply.
+# It periodically updates the display.
+interval:
+  - interval: 2min
+    then:
+      - if:
+          condition:
+            and:
+              - binary_sensor.is_on: sensors_ready
+              - binary_sensor.is_on: voltage_present
+          then:
+            - component.update: epd
+            - component.update: adc_5v_raw
+            - component.update: adc_batt_raw
+
+display:
+  - platform: waveshare_epaper
+    id: epd
+    model: 2.90inv2
+    reset_duration: 2ms
+    rotation: 270
+    cs_pin: GPIO20
+    dc_pin: GPIO19
+    busy_pin: GPIO16
+    reset_pin: GPIO18
+    full_update_every: 5 # Perform a full refresh every 5 partial updates to prevent ghosting.
+    update_interval: never # The display is updated manually via component.update.
+    lambda: |-
+      // Don't draw anything if the sensor data hasn't arrived yet.
+      if (!id(sensors_ready).state) {
+        ESP_LOGI("display", "Sensors not ready — skipping EPaper draw");
+        return;
+      }
+
+      int w = it.get_width();
+      int h = it.get_height();
+
+      // Clear the top and bottom bars for redrawing.
+      it.filled_rectangle(0, 0, w, 28, Color::WHITE);
+      it.filled_rectangle(0, h - 16, w, 16, Color::WHITE);
+
+      // -- DRAW TOP AND BOTTOM BARS --
+      it.printf(70, -3, id(roboto_30), Color::BLACK, TextAlign::TOP_LEFT, "%.0f°C", id(temperature_outside).state);
+      it.print(30, 0, id(font_temp), Color::BLACK, "\U000F0F54");
+      it.printf(200, -3, id(roboto_30), Color::BLACK, TextAlign::TOP_LEFT, "%.0f%%", id(humidity_outside).state);
+      it.print(160, 0, id(font_temp), Color::BLACK, "\U000F058E");
+      it.strftime(5, h - 16, id(roboto_14), Color::BLACK, TextAlign::TOP_LEFT, "%d.%m.%Y %H:%M", id(home_time).now());
+
+      // -- DRAW BATTERY INDICATOR --
+      const int BATT_X = w - 44, BATT_Y = h - 14, BATT_W = 30, BATT_H = 12;
+      it.rectangle(BATT_X, BATT_Y, BATT_W, BATT_H, Color::BLACK);
+      it.filled_rectangle(BATT_X + BATT_W, BATT_Y + (BATT_H/3), 4, BATT_H/3, Color::BLACK);
+      if (id(battery_percent).has_state()) {
+        const int PAD = 2;
+        int fill_w = (int) roundf((BATT_W - 2*PAD) * (id(battery_percent).state / 100.0f));
+        it.filled_rectangle(BATT_X + PAD, BATT_Y + PAD, fill_w, BATT_H - 2*PAD, Color::BLACK);
+      }
+      if (id(voltage_present).state) {
+        it.print(BATT_X - 30, BATT_Y - 2, id(roboto_14), Color::BLACK, "+5V");
+      }
+
+      // -- DRAW 5-DAY FORECAST --
+      // Map Home Assistant weather conditions to Material Design Icons.
+      static const std::map<std::string, const char *> icon_dict = {
+        {"clear-night", "\U000F0594"}, {"cloudy", "\U000F0590"}, {"fog", "\U000F0591"},
+        {"hail", "\U000F0592"}, {"lightning", "\U000F0593"}, {"lightning-rainy", "\U000F067E"},
+        {"partlycloudy", "\U000F0595"}, {"pouring", "\U000F0596"}, {"rainy", "\U000F0597"},
+        {"snowy", "\U000F0598"}, {"snowy-rainy", "\U000F067F"}, {"sunny", "\U000F0599"},
+        {"windy", "\U000F059D"}, {"windy-variant", "\U000F059E"}, {"exceptional", ""}, {"", ""}
+      };
+
+      // Define vertical positions for forecast elements for easy layout adjustments.
+      static const int Y_DAY = 36;
+      static const int Y_ICON = 61;
+      static const int Y_TEMP = 88;
+      static const int Y_PRECIP = 103;
+
+      // Calculate the horizontal positions for the 5 forecast columns.
+      int step_forecast_x = round(w / 5.0);
+      for (int i = 1; i <= 5; i++) {
+        id(x_forecast)[i] = round((i - 1) * step_forecast_x + step_forecast_x / 2.0);
+      }
+
+      // Loop through the 5 days of forecast data.
+      int forecast_day_of_week = id(home_time).now().day_of_week; // Start with today.
+      for (int i = 1; i <= 5; ++i) {
+        std::string condition = id(forecast_condition)[i];
+        
+        // Draw the day name, icon, temperatures, and precipitation for the current day in the loop.
+        it.printf(id(x_forecast)[i], Y_DAY, id(font_day), TextAlign::CENTER, "%s", id(day_names_ext)[forecast_day_of_week]);
+        
+        if (icon_dict.count(condition) > 0) {
+          it.printf(id(x_forecast)[i], Y_ICON, id(symbols_font), TextAlign::CENTER, "%s", icon_dict.at(condition));
+        }
+        
+        it.printf(id(x_forecast)[i], Y_TEMP, id(font_forecast), TextAlign::CENTER, "%.0f°|%.0f°", id(forecast_temp_min)[i], id(forecast_temp_max)[i]);
+        it.printf(id(x_forecast)[i], Y_PRECIP, id(font_forecast), TextAlign::CENTER, "%.0f mm", id(forecast_precip)[i]);
+
+        // Increment the day of the week for the next iteration.
+        forecast_day_of_week = (forecast_day_of_week % 7) + 1;
+      }
+
+deep_sleep:
+  id: deep_sleep_ctrl
+  run_duration: ${run_time}
+  sleep_duration: ${sleep_time}
+  wakeup_pin: GPIO5
+  wakeup_pin_mode: KEEP_AWAKE
