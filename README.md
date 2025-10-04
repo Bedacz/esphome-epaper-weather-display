@@ -2,7 +2,7 @@
 
 A battery-powered, deep-sleeping E-Paper weather station built with an ESP32-C6 and ESPHome, pulling all data from Home Assistant.
 
-![ESPHome E-Paper Weather Display](https://github.com/user-attachments/assets/a2603f33-81b7-48cd-b367-f3b979f53764)
+![ESPHome E-Paper Weather Display](https://github.com/user-attachments/assets/40755404-2f58-46b8-8729-94c887d0f0c9)
 
 ---
 
@@ -25,7 +25,7 @@ A battery-powered, deep-sleeping E-Paper weather station built with an ESP32-C6 
 
 ## Wiring Diagram
 
-<img width="606" height="467" alt="Circuit" src="https://github.com/user-attachments/assets/b839a896-ded3-497c-a90c-44522fdf5bc2" />
+<img width="606" height="467" alt="Circuit" src="https://github.com/user-attachments/assets/701f2e11-a6e7-4a6a-8308-e02831b1fd1d" />
 
 ```
 Power & Dividers (left)                             ESP32 (center)             E-Ink Display (right)
