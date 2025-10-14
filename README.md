@@ -25,28 +25,28 @@ A battery-powered, deep-sleeping E-Paper weather station built with an ESP32-C6 
 
 ## Wiring Diagram
 
-<img width="606" height="467" alt="Circuit" src="https://github.com/user-attachments/assets/701f2e11-a6e7-4a6a-8308-e02831b1fd1d" />
+<img width="606" height="467" alt="Circuit" src="https://github.com/user-attachments/assets/19487e7f-9607-44df-a915-0ed025fd224b" />
 
 ```
 Power & Dividers (left)                             ESP32 (center)             E-Ink Display (right)
 ───────────────────────────                   ────────────────────────      ─────────────────────────────
                                                 ┌──────────────────┐            WeAct 2.9"
                                                 │      ESP32 C6    │            (3.3V logic)
-              |─────────────────────────────────┤◄─ 5V             │
-           [20kΩ]                               │                  │
-              |                                 │  GPIO17 ──────────────── CLK  ─────────────► SCK
-          ──● Node A (GPIO4 sense) ─────────────┤◄─ GPIO4 (ADC 5V)|        (SPI clock)
-              |                                 │                  |
-              |                                 │  GPIO14 ──────────────── MOSI ─────────────► DIN
-              |                                 │                  |    (SPI data out)
-              |                                 │                  |
-            (series link)                       │  GPIO20 ───────────────── CS   ─────────────► CS
-              |                                 │                  |
-          ──● Node B (GPIO5 wake) ──────────────┤◄─ GPIO5 (wakeup)|
+     |────────|─────────────────────────────────┤◄─ 5V             │
+  [20kΩ]   [20kΩ]                               │                  │
+     |        |                                 │  GPIO17 ──────────────── CLK  ─────────────► SCK
+     |    ──● Node A (GPIO4 sense) ─────────────┤◄─ GPIO4 (ADC 5V)|        (SPI clock)
+     |        |                                 │                  |
+     |     [30kΩ]                               │  GPIO14 ──────────────── MOSI ─────────────► DIN
+     |        |                                 │                  |    (SPI data out)
+     |       GND                                │                  |
+     |                                          │  GPIO20 ───────────────── CS   ─────────────► CS
+     |────────|                                 │                  |
+          ──● Node B (GPIO7 wake) ──────────────┤◄─ GPIO7 (wakeup)|
               |                                 │                  |
            [30kΩ]                               │  GPIO19 ───────────────── DC   ─────────────► D/C
               |                                 │                  |
-            GND                                 │  GPIO18 ───────────────── RST  ─────────────► RST
+             GND                                │  GPIO18 ───────────────── RST  ─────────────► RST
                                                 │                  |
       4.2V (LiPo)                               │  GPIO16  ◄──────────────── BUSY ─────────────◄ BUSY
               |                                 │                  |
@@ -61,11 +61,11 @@ Power & Dividers (left)                             ESP32 (center)             E
 Legend:
   [value]   = resistor
   ● Node A  = divider tap for 5V sense (GPIO4)
-  ● Node B  = divider mid / wake input (GPIO5)
+  ● Node B  = divider tap / wake input (GPIO7)
   ● Node C  = divider tap for LiPo sense (GPIO3)
   LED       = “Awake LED” driven by GPIO15 (add a series resistor if needed)
 ```
-* GPIO5 doubles as a wake pin for deep sleep. GPIO15 drives an LED to indicate awake state. Both battery and 5V input are monitored via resistor dividers.
+* GPIO7 doubles as a wake pin for deep sleep. GPIO15 drives an LED to indicate awake state. Both battery and 5V input are monitored via resistor dividers.
 
 ## Power Management
 The display is battery-powered and relies on ESPHome's deep sleep functionality:
