@@ -330,7 +330,6 @@ binary_sensor:
     on_release: # If voltage is lost, go to sleep immediately to save power.
       then:
         - logger.log: "Voltage lost — entering deep sleep."
-        - light.turn_off: awake_led
         - deep_sleep.enter: deep_sleep_ctrl
 
   # A template sensor to check if all required data has been received from Home Assistant.
@@ -355,7 +354,6 @@ binary_sensor:
             then: # If on battery power, go to sleep after the update.
               - logger.log: "5V absent — sleeping after draw."
               - delay: 5s # Allow time for the display to finish updating.
-              - light.turn_off: awake_led
               - script.execute: enter_sleep
             else: # If plugged in, stay awake.
               - logger.log: "5V present — staying awake."
@@ -365,6 +363,7 @@ script:
   # This script contains the main logic for determining the sleep duration.
   - id: enter_sleep
     then:
+      - light.turn_off: awake_led
       - if:
           # This universal condition checks if the current time is within the defined night mode window.
           # It works for both same-day (e.g. 1am-6am) and cross-midnight (e.g. 10pm-6am) intervals.
@@ -545,5 +544,8 @@ deep_sleep:
   id: deep_sleep_ctrl
   run_duration: ${run_time}
   sleep_duration: ${sleep_time}
-  wakeup_pin: GPIO5
+  wakeup_pin:
+    number: GPIO7
+    mode: INPUT_PULLDOWN
   wakeup_pin_mode: KEEP_AWAKE
+
